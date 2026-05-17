@@ -136,14 +136,6 @@ export default function MensualidadesPage() {
     loadConfig();
   }, [getConfiguracion]);
 
-  if (loadingResumen) {
-    return <StatusState title="Cargando mensualidades..." description="Leyendo el resumen calculado en el backend." />;
-  }
-
-  if (errorResumen) {
-    return <StatusState title="No se pudieron cargar las mensualidades" description={errorResumen} />;
-  }
-
   const months = resumen?.months || [];
   const rows = resumen?.rows || [];
   const monthlyFee = Number(resumen?.monthlyFee || 25000);
@@ -170,6 +162,14 @@ export default function MensualidadesPage() {
       });
     });
   }, [rows, searchPersona, statusFilter, monthFilter, monthlyFee]);
+
+  if (loadingResumen) {
+    return <StatusState title="Cargando mensualidades..." description="Leyendo el resumen calculado en el backend." />;
+  }
+
+  if (errorResumen) {
+    return <StatusState title="No se pudieron cargar las mensualidades" description={errorResumen} />;
+  }
 
   return (
     <div className="space-y-6">
