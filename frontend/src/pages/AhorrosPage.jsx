@@ -8,12 +8,22 @@ export default function AhorrosPage() {
   const { ahorros, addAhorro } = useData();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [filterTipo, setFilterTipo] = useState("TODOS");
+  const [monthFilter, setMonthFilter] = useState("TODOS");
+  const [search, setSearch] = useState("");
   const [formData, setFormData] = useState({ fecha: new Date().toISOString().split("T")[0], tipo: "DEPOSITO", monto: "", descripcion: "" });
 
-  const filteredAhorros = useMemo(
-    () => ahorros.filter((ahorro) => (filterTipo === "TODOS" ? true : ahorro.tipo === filterTipo)),
-    [ahorros, filterTipo],
-  );
+  const filteredAhorros = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return ahorros.filter((ahorro) => {
+      const matchTipo = filterTipo === "TODOS" ? true : ahorro.tipo === filterTipo;
+      const matchMes =
+        monthFilter === "TODOS" ? true : String(new Date(ahorro.fecha).getMonth() + 1) === monthFilter;
+      const matchQuery = query
+        ? String(ahorro.descripcion || "").toLowerCase().includes(query)
+        : true;
+      return matchTipo && matchMes && matchQuery;
+    });
+  }, [ahorros, filterTipo, monthFilter, search]);
 
   const totalDepositos = ahorros.filter((ahorro) => ahorro.tipo === "DEPOSITO").reduce((sum, ahorro) => sum + Number(ahorro.monto || 0), 0);
   const totalRetiros = ahorros.filter((ahorro) => ahorro.tipo === "RETIRO").reduce((sum, ahorro) => sum + Number(ahorro.monto || 0), 0);
@@ -70,6 +80,11 @@ export default function AhorrosPage() {
             <option value="DEPOSITO">Depósitos</option>
             <option value="RETIRO">Retiros</option>
           </select>
+          <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm outline-none focus:border-blue-500">
+            <option value="TODOS">Todos los meses</option>
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={String(month)}>{month}</option>)}
+          </select>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar descripción..." className="rounded-xl border border-gray-200 px-4 py-2 text-sm outline-none focus:border-blue-500" />
         </div>
 
         <div className="overflow-x-auto">
