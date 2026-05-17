@@ -11,7 +11,7 @@ datasource db {
 model Persona {
   id              Int           @id @default(autoincrement())
 
-  nombre          String
+  nombre          String        @unique
   telefono        String?
 
   activa          Boolean       @default(true)
@@ -47,7 +47,8 @@ model Movimiento {
   valor               Decimal @db.Decimal(10, 2)
   fecha               DateTime         @default(now())
 
-  mesCorrespondiente  String?
+  mes                 Int?
+  anio                Int?
 
   observacion         String?
 
