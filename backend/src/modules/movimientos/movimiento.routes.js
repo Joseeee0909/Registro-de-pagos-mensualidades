@@ -4,5 +4,7 @@ const movimientoController = require('./movimiento.controller');
 
 router.post('/', movimientoController.createMovimiento);
 router.get('/', movimientoController.getMovimientos);
+router.put('/:id', movimientoController.updateMovimiento);
+router.delete('/:id', movimientoController.deleteMovimiento);
 
 module.exports = router;

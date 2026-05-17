@@ -24,7 +24,7 @@ lerna-debug.log*
 *.local
 
 # Prisma / generated code
-/src/generated/prisma/
+/prisma/migrations/
 
 # Editor and OS files
 .vscode/*
