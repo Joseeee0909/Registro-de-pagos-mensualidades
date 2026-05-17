@@ -29,12 +29,27 @@ export default function MovimientosPage() {
   const [formError, setFormError] = useState("");
   const [editingMovimiento, setEditingMovimiento] = useState(null);
   const [filterTipo, setFilterTipo] = useState("TODOS");
+  const [search, setSearch] = useState("");
+  const [ordenFecha, setOrdenFecha] = useState("FECHA_DESC");
   const [formData, setFormData] = useState(createEmptyForm());
 
-  const filteredMovimientos = useMemo(
-    () => movimientos.filter((movimiento) => (filterTipo === "TODOS" ? true : movimiento.tipo === filterTipo)),
-    [movimientos, filterTipo],
-  );
+  const filteredMovimientos = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const filtered = movimientos.filter((movimiento) => {
+      const matchTipo = filterTipo === "TODOS" ? true : movimiento.tipo === filterTipo;
+      if (!matchTipo) return false;
+      if (!query) return true;
+      return [movimiento.concepto?.nombre, movimiento.observacion, movimiento.persona?.nombre].some((value) =>
+        String(value || "").toLowerCase().includes(query),
+      );
+    });
+
+    return filtered.sort((a, b) => {
+      const aDate = new Date(a.fecha).getTime();
+      const bDate = new Date(b.fecha).getTime();
+      return ordenFecha === "FECHA_ASC" ? aDate - bDate : bDate - aDate;
+    });
+  }, [movimientos, filterTipo, search, ordenFecha]);
 
   const totalIngresos = movimientos.filter((movimiento) => movimiento.tipo === "INGRESO").reduce((sum, movimiento) => sum + Number(movimiento.valor || 0), 0);
   const totalEgresos = movimientos.filter((movimiento) => movimiento.tipo === "EGRESO").reduce((sum, movimiento) => sum + Number(movimiento.valor || 0), 0);
@@ -177,6 +192,10 @@ export default function MovimientosPage() {
             <option value="TODOS">Todos</option>
             <option value="INGRESO">Ingresos</option>
             <option value="EGRESO">Egresos</option>
+          </select>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar concepto/persona..." className="rounded-xl border border-gray-200 px-4 py-2 text-sm outline-none focus:border-blue-500" />
+          <select value={ordenFecha} onChange={(event) => setOrdenFecha(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm outline-none focus:border-blue-500">
+            <option value="FECHA_DESC">Más recientes</option><option value="FECHA_ASC">Más antiguos</option>
           </select>
         </div>
 

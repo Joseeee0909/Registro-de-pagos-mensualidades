@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import Modal from "../components/Modal";
 import { useData } from "../context/DataContext";
@@ -21,6 +21,9 @@ export default function MensualidadesPage() {
   const [editingMensualidad, setEditingMensualidad] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   const [formData, setFormData] = useState(createEmptyForm(DEFAULT_YEAR));
+  const [searchPersona, setSearchPersona] = useState("");
+  const [statusFilter, setStatusFilter] = useState("TODOS");
+  const [monthFilter, setMonthFilter] = useState("TODOS");
 
   const loadResumen = useCallback(
     async (targetYear = year) => {
@@ -133,6 +136,33 @@ export default function MensualidadesPage() {
     loadConfig();
   }, [getConfiguracion]);
 
+  const months = resumen?.months || [];
+  const rows = resumen?.rows || [];
+  const monthlyFee = Number(resumen?.monthlyFee || 25000);
+  const stats = resumen?.stats || { paidCount: 0, pendingCount: 0, totalPaid: 0 };
+  const filteredRows = useMemo(() => {
+    const query = searchPersona.trim().toLowerCase();
+    const selectedMonth = monthFilter === "TODOS" ? null : Number(monthFilter);
+
+    return rows.filter((row) => {
+      if (query && !String(row.persona.nombre || "").toLowerCase().includes(query)) return false;
+      if (statusFilter === "TODOS" && !selectedMonth) return true;
+
+      const cells = selectedMonth ? row.cells.filter((cell) => Number(cell.month.key) === selectedMonth) : row.cells;
+      if (!cells.length) return false;
+      if (statusFilter === "TODOS") return true;
+
+      return cells.some((cell) => {
+        const paid = Number(cell.totalPaid || 0);
+        const isPartial = paid > 0 && paid < monthlyFee;
+        const isComplete = paid >= monthlyFee;
+        if (statusFilter === "PAGADO") return isComplete;
+        if (statusFilter === "PARCIAL") return isPartial;
+        return paid === 0;
+      });
+    });
+  }, [rows, searchPersona, statusFilter, monthFilter, monthlyFee]);
+
   if (loadingResumen) {
     return <StatusState title="Cargando mensualidades..." description="Leyendo el resumen calculado en el backend." />;
   }
@@ -140,11 +170,6 @@ export default function MensualidadesPage() {
   if (errorResumen) {
     return <StatusState title="No se pudieron cargar las mensualidades" description={errorResumen} />;
   }
-
-  const months = resumen?.months || [];
-  const rows = resumen?.rows || [];
-  const monthlyFee = Number(resumen?.monthlyFee || 25000);
-  const stats = resumen?.stats || { paidCount: 0, pendingCount: 0, totalPaid: 0 };
 
   return (
     <div className="space-y-6">
@@ -179,6 +204,19 @@ export default function MensualidadesPage() {
         <MiniCard label="Monto pagado" value={formatCurrency(stats.totalPaid)} valueClassName="text-blue-600" />
       </div>
 
+
+      <div className="grid grid-cols-1 gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4">
+        <input value={searchPersona} onChange={(event) => setSearchPersona(event.target.value)} placeholder="Buscar persona..." className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500">
+          <option value="TODOS">Todos los estados</option><option value="PAGADO">Pagado</option><option value="PARCIAL">Parcial</option><option value="PENDIENTE">No pagado</option>
+        </select>
+        <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500">
+          <option value="TODOS">Todos los meses</option>
+          {months.map((month) => <option key={month.key} value={String(month.key)}>{month.label}</option>)}
+        </select>
+        <div className="flex items-center justify-end text-sm text-gray-500">{filteredRows.length} persona(s)</div>
+      </div>
+
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Pagos por mes</h2>
@@ -200,7 +238,7 @@ export default function MensualidadesPage() {
             </thead>
 
             <tbody>
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <tr key={row.persona.id} className="hover:bg-gray-50/60">
                   <td className="sticky left-0 z-10 border-b border-r border-gray-200 bg-white px-4 py-3 font-medium text-gray-900">
                     {row.persona.nombre}
