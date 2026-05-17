@@ -68,9 +68,6 @@ const getMensualidadesResumen = async (anio) => {
       where: {
         tipo: "INGRESO",
         anio: year,
-        concepto: {
-          OR: [{ tipo: "MENSUALIDAD" }, { esMensualidad: true }],
-        },
       },
       include: {
         persona: true,
@@ -86,28 +83,22 @@ const getMensualidadesResumen = async (anio) => {
 
   const paymentsByPerson = new Map();
 
-  movimientosToCells(movimientos).forEach((entry) => {
-    if (!paymentsByPerson.has(entry.personaId)) {
-      paymentsByPerson.set(entry.personaId, new Map());
-    }
+  movimientosToCells(movimientos)
+    .filter((entry) => isMensualidadMovimiento(entry))
+    .forEach((entry) => {
+      if (!paymentsByPerson.has(entry.personaId)) {
+        paymentsByPerson.set(entry.personaId, new Map());
+      }
 
-    const personMonths = paymentsByPerson.get(entry.personaId);
-    const current = personMonths.get(entry.mes) || createCellSummary();
-
-    current.payments.push(entry);
-    current.totalPaid += Number(entry.valor);
-    current.latestPayment = pickLatestPayment(current.latestPayment, entry);
-    current.remaining = Math.max(Number(mensualidadBase) - current.totalPaid, 0);
-    current.status = current.totalPaid >= Number(mensualidadBase) ? "PAGADO" : current.totalPaid > 0 ? "PARCIAL" : "PENDIENTE";
-
-    personMonths.set(entry.mes, current);
-  });
+      const personMonths = paymentsByPerson.get(entry.personaId);
+      allocateMensualidadPayment(personMonths, entry, mensualidadBase);
+    });
 
   const rows = personas.map((persona) => {
     const personMonths = paymentsByPerson.get(persona.id) || new Map();
 
     const cells = MONTHS.map((month) => {
-      const summary = personMonths.get(month.key) || createCellSummary();
+      const summary = personMonths.get(month.key) || createCellSummary(mensualidadBase);
 
       return {
         month,
@@ -154,14 +145,53 @@ const getMensualidadGeneral = async () => {
   return Number(configuracion?.mensualidadGeneral || DEFAULT_MONTHLY_FEE);
 };
 
-function createCellSummary() {
+function createCellSummary(monthlyFee = DEFAULT_MONTHLY_FEE) {
   return {
     totalPaid: 0,
-    remaining: Number(DEFAULT_MONTHLY_FEE),
+    remaining: Number(monthlyFee),
     status: "PENDIENTE",
     latestPayment: null,
     payments: [],
   };
+}
+
+function allocateMensualidadPayment(personMonths, entry, monthlyFee) {
+  let remaining = Number(entry.valor || 0);
+  const startMonth = clampMonth(entry.mes || 1);
+
+  for (let month = startMonth; month <= 12 && remaining > 0; month += 1) {
+    const current = personMonths.get(month) || createCellSummary(monthlyFee);
+    const available = Math.max(Number(monthlyFee) - Number(current.totalPaid || 0), 0);
+
+    if (available <= 0) {
+      continue;
+    }
+
+    const applied = Math.min(available, remaining);
+
+    current.totalPaid += applied;
+    current.remaining = Math.max(Number(monthlyFee) - current.totalPaid, 0);
+    current.status = current.totalPaid >= Number(monthlyFee) ? "PAGADO" : current.totalPaid > 0 ? "PARCIAL" : "PENDIENTE";
+    current.latestPayment = pickLatestPayment(current.latestPayment, entry);
+    current.payments.push({
+      ...entry,
+      appliedAmount: applied,
+      allocatedMonth: month,
+    });
+
+    personMonths.set(month, current);
+    remaining -= applied;
+  }
+}
+
+function clampMonth(month) {
+  const value = Number(month);
+
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.min(Math.max(value, 1), 12);
 }
 
 function pickLatestPayment(previous, current) {
@@ -188,6 +218,13 @@ function movimientosToCells(movimientos) {
     persona: movimiento.persona,
     concepto: movimiento.concepto,
   }));
+}
+
+function isMensualidadMovimiento(movimiento) {
+  return Boolean(
+    movimiento.concepto &&
+      (movimiento.concepto.tipo === "MENSUALIDAD" || movimiento.concepto.esMensualidad)
+  );
 }
 
 module.exports = {

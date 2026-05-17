@@ -5,11 +5,28 @@ import { useData } from "../context/DataContext";
 import { formatCurrency, formatDateTime } from "../utils/formatters";
 
 const DEFAULT_YEAR = 2026;
+const DEFAULT_MONTH = new Date().getMonth() + 1;
+
+const MONTH_OPTIONS = [
+  { value: "1", label: "Enero" },
+  { value: "2", label: "Febrero" },
+  { value: "3", label: "Marzo" },
+  { value: "4", label: "Abril" },
+  { value: "5", label: "Mayo" },
+  { value: "6", label: "Junio" },
+  { value: "7", label: "Julio" },
+  { value: "8", label: "Agosto" },
+  { value: "9", label: "Septiembre" },
+  { value: "10", label: "Octubre" },
+  { value: "11", label: "Noviembre" },
+  { value: "12", label: "Diciembre" },
+];
 
 export default function MovimientosPage() {
   const { movimientos, personas, conceptos, addMovimiento, updateMovimiento, deleteMovimiento, loading, error } = useData();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const [editingMovimiento, setEditingMovimiento] = useState(null);
   const [filterTipo, setFilterTipo] = useState("TODOS");
   const [formData, setFormData] = useState(createEmptyForm());
@@ -38,7 +55,20 @@ export default function MovimientosPage() {
 
   const isMensualidadConcept = Boolean(selectedConcepto && (selectedConcepto.tipo === "MENSUALIDAD" || selectedConcepto.esMensualidad));
 
+  const handleConceptoChange = (value) => {
+    const concepto = conceptos.find((item) => String(item.id) === String(value));
+    const isMensualidadSelected = Boolean(concepto && (concepto.tipo === "MENSUALIDAD" || concepto.esMensualidad));
+
+    setFormData((current) => ({
+      ...current,
+      conceptoId: value,
+      mes: isMensualidadSelected ? current.mes || String(DEFAULT_MONTH) : "",
+      anio: isMensualidadSelected ? current.anio || String(DEFAULT_YEAR) : "",
+    }));
+  };
+
   const handleOpenDialog = (movimiento) => {
+    setFormError("");
     if (movimiento) {
       setEditingMovimiento(movimiento);
       setFormData({
@@ -61,6 +91,18 @@ export default function MovimientosPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setFormError("");
+
+    if (!formData.fecha || !formData.tipo || !formData.conceptoId || !formData.monto) {
+      setFormError("Completa los campos obligatorios antes de guardar");
+      return;
+    }
+
+    if (isMensualidadConcept && (!formData.mes || !formData.anio || !formData.personaId)) {
+      setFormError("Para mensualidad debes elegir persona, mes y año");
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -69,8 +111,8 @@ export default function MovimientosPage() {
       valor: Number(formData.monto),
       conceptoId: Number(formData.conceptoId),
       personaId: formData.personaId ? Number(formData.personaId) : null,
-      mes: isMensualidadConcept ? Number(formData.mes) : null,
-      anio: isMensualidadConcept ? Number(formData.anio) : null,
+      mes: isMensualidadConcept ? Number(formData.mes || DEFAULT_MONTH) : null,
+      anio: isMensualidadConcept ? Number(formData.anio || DEFAULT_YEAR) : null,
       observacion: formData.observacion,
     };
 
@@ -82,6 +124,8 @@ export default function MovimientosPage() {
       }
 
       setIsDialogOpen(false);
+    } catch (submitError) {
+      setFormError(submitError?.response?.data?.error || submitError?.message || "No se pudo guardar el movimiento");
     } finally {
       setIsSaving(false);
     }
@@ -204,7 +248,7 @@ export default function MovimientosPage() {
           <SelectField
             label="Concepto"
             value={formData.conceptoId}
-            onChange={(value) => setFormData({ ...formData, conceptoId: value, mes: "", anio: "" })}
+              onChange={handleConceptoChange}
             options={availableConceptos.map((concepto) => String(concepto.id))}
             optionLabels={Object.fromEntries(availableConceptos.map((concepto) => [String(concepto.id), `${concepto.nombre} (${concepto.tipo})`]))}
             placeholder="Selecciona un concepto"
@@ -247,6 +291,8 @@ export default function MovimientosPage() {
 
           <Field label="Observación" value={formData.observacion} onChange={(value) => setFormData({ ...formData, observacion: value })} placeholder="Detalles adicionales..." multiline rows={3} />
 
+          {formError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div> : null}
+
           <div className="mt-2 flex justify-end gap-3">
             <button type="button" onClick={() => setIsDialogOpen(false)} className="rounded-xl border border-gray-200 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">
               Cancelar
@@ -268,7 +314,7 @@ function createEmptyForm() {
     monto: "",
     conceptoId: "",
     personaId: "",
-    mes: "",
+    mes: String(DEFAULT_MONTH),
     anio: String(DEFAULT_YEAR),
     observacion: "",
   };
@@ -346,21 +392,6 @@ function ActionButton({ children, onClick }) {
 function badgeClassName(tipo) {
   return ["inline-flex rounded-full px-3 py-1 text-xs font-semibold", tipo === "INGRESO" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"].join(" ");
 }
-
-const MONTH_OPTIONS = [
-  { value: "1", label: "Enero" },
-  { value: "2", label: "Febrero" },
-  { value: "3", label: "Marzo" },
-  { value: "4", label: "Abril" },
-  { value: "5", label: "Mayo" },
-  { value: "6", label: "Junio" },
-  { value: "7", label: "Julio" },
-  { value: "8", label: "Agosto" },
-  { value: "9", label: "Septiembre" },
-  { value: "10", label: "Octubre" },
-  { value: "11", label: "Noviembre" },
-  { value: "12", label: "Diciembre" },
-];
 
 function StatusState({ title, description }) {
   return (

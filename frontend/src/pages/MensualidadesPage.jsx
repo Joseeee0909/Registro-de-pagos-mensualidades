@@ -7,11 +7,15 @@ import { formatCurrency } from "../utils/formatters";
 const DEFAULT_YEAR = 2026;
 
 export default function MensualidadesPage() {
-  const { getMensualidadesResumen, addMensualidad, updateMensualidad, deleteMovimiento } = useData();
+  const { movimientosVersion, getMensualidadesResumen, getConfiguracion, updateConfiguracion, addMensualidad, updateMensualidad, deleteMovimiento } = useData();
   const [year, setYear] = useState(DEFAULT_YEAR);
   const [resumen, setResumen] = useState(null);
   const [loadingResumen, setLoadingResumen] = useState(true);
   const [errorResumen, setErrorResumen] = useState("");
+  const [formError, setFormError] = useState("");
+  const [monthlyFeeForm, setMonthlyFeeForm] = useState("");
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isConfigSaving, setIsConfigSaving] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingMensualidad, setEditingMensualidad] = useState(null);
@@ -37,9 +41,10 @@ export default function MensualidadesPage() {
 
   useEffect(() => {
     loadResumen(year);
-  }, [loadResumen, year]);
+  }, [loadResumen, year, movimientosVersion]);
 
   const openDialog = (persona, month, latestPayment = null) => {
+    setFormError("");
     setSelectedCell({ persona, month });
     setEditingMensualidad(latestPayment);
     setFormData({
@@ -53,6 +58,13 @@ export default function MensualidadesPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setFormError("");
+
+    if (!formData.personaId || !formData.mes || !formData.anio || !formData.monto) {
+      setFormError("Completa persona, mes, año y monto antes de guardar");
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -72,6 +84,8 @@ export default function MensualidadesPage() {
 
       await loadResumen(year);
       setIsDialogOpen(false);
+    } catch (submitError) {
+      setFormError(submitError?.response?.data?.error || submitError?.message || "No se pudo guardar la mensualidad");
     } finally {
       setIsSaving(false);
     }
@@ -84,6 +98,40 @@ export default function MensualidadesPage() {
     await loadResumen(year);
     setIsDialogOpen(false);
   };
+
+  const handleSaveConfig = async (event) => {
+    event.preventDefault();
+    setIsConfigSaving(true);
+
+    if (!monthlyFeeForm || Number(monthlyFeeForm) <= 0) {
+      setFormError("El precio de la mensualidad debe ser mayor a 0");
+      setIsConfigSaving(false);
+      return;
+    }
+
+    try {
+      const config = await updateConfiguracion({ mensualidadGeneral: Number(monthlyFeeForm) });
+      setMonthlyFeeForm(String(config?.mensualidadGeneral || monthlyFeeForm));
+      await loadResumen(year);
+      setIsConfigOpen(false);
+      setFormError("");
+    } finally {
+      setIsConfigSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const config = await getConfiguracion();
+        setMonthlyFeeForm(String(config?.mensualidadGeneral || ""));
+      } catch {
+        setMonthlyFeeForm("");
+      }
+    };
+
+    loadConfig();
+  }, [getConfiguracion]);
 
   if (loadingResumen) {
     return <StatusState title="Cargando mensualidades..." description="Leyendo el resumen calculado en el backend." />;
@@ -115,6 +163,14 @@ export default function MensualidadesPage() {
             className="w-28 rounded-xl border border-gray-200 px-3 py-2 outline-none focus:border-blue-500"
           />
         </label>
+
+        <button
+          type="button"
+          onClick={() => setIsConfigOpen(true)}
+          className="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2.5 font-semibold text-gray-700 transition hover:bg-gray-50"
+        >
+          Configuración
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -152,7 +208,7 @@ export default function MensualidadesPage() {
 
                   {row.cells.map((cell) => {
                     const paid = Number(cell.totalPaid || 0);
-                    const remaining = Number(cell.remaining || monthlyFee) || 0;
+                    const remaining = Number(cell.remaining ?? monthlyFee) || 0;
                     const latestPayment = cell.latestPayment || null;
                     const isPartial = paid > 0 && paid < monthlyFee;
                     const isComplete = paid >= monthlyFee;
@@ -233,6 +289,30 @@ export default function MensualidadesPage() {
                 {isSaving ? "Guardando..." : editingMensualidad ? "Guardar cambios" : "Registrar"}
               </button>
             </div>
+          </div>
+
+          {formError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div> : null}
+        </form>
+      </Modal>
+
+      <Modal open={isConfigOpen} onClose={() => setIsConfigOpen(false)} title="Configuración de mensualidad" description="Ajusta el precio base de la mensualidad">
+        <form onSubmit={handleSaveConfig} className="grid gap-4">
+          <Field
+            label="Precio mensualidad"
+            type="number"
+            step="0.01"
+            value={monthlyFeeForm}
+            onChange={(value) => setMonthlyFeeForm(value)}
+            required
+          />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => setIsConfigOpen(false)} className="rounded-xl border border-gray-200 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">
+              Cancelar
+            </button>
+            <button type="submit" disabled={isConfigSaving} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {isConfigSaving ? "Guardando..." : "Guardar configuración"}
+            </button>
           </div>
         </form>
       </Modal>

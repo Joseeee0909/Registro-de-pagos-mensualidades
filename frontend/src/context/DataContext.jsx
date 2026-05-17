@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import api from "../api/api";
 
@@ -49,6 +49,8 @@ export function DataProvider({ children }) {
   const [movimientos, setMovimientos] = useState([]);
   const [conceptos, setConceptos] = useState([]);
   const [caja, setCaja] = useState(null);
+  const [configuracion, setConfiguracion] = useState(null);
+  const [movimientosVersion, setMovimientosVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -57,17 +59,19 @@ export function DataProvider({ children }) {
     setError("");
 
     try {
-      const [personasResponse, movimientosResponse, conceptosResponse, cajaResponse] = await Promise.all([
+      const [personasResponse, movimientosResponse, conceptosResponse, cajaResponse, configuracionResponse] = await Promise.all([
         api.get("/personas"),
         api.get("/movimientos"),
         api.get("/conceptos"),
         api.get("/reportes/caja"),
+        api.get("/configuracion"),
       ]);
 
       setPersonas((personasResponse.data || []).map(mapPersona));
       setMovimientos((movimientosResponse.data || []).map(mapMovimiento));
       setConceptos((conceptosResponse.data || []).map(mapConcepto));
       setCaja(cajaResponse.data || null);
+      setConfiguracion(configuracionResponse.data || null);
     } catch (requestError) {
       setError(getNormalizedError(requestError));
     } finally {
@@ -117,7 +121,7 @@ export function DataProvider({ children }) {
       movimientosAhorro.map((movimiento) => ({
         id: movimiento.id,
         movimientoId: movimiento.id,
-        fecha: movimiento.fecha ? movement.fecha.split("T")[0] : "",
+        fecha: movimiento.fecha ? movimiento.fecha.split("T")[0] : "",
         monto: Number(movimiento.valor || 0),
         tipo: movimiento.tipo === "INGRESO" ? "DEPOSITO" : "RETIRO",
         descripcion: movimiento.observacion || movimiento.concepto?.nombre || "",
@@ -131,13 +135,30 @@ export function DataProvider({ children }) {
     await loadData();
   };
 
-  const getMensualidadesResumen = async (anio) => {
+  const bumpMovimientosVersion = () => {
+    setMovimientosVersion((current) => current + 1);
+  };
+
+  const getMensualidadesResumen = useCallback(async (anio) => {
     const response = await api.get("/reportes/mensualidades", {
       params: { anio },
     });
 
     return response.data;
-  };
+  }, []);
+
+  const getConfiguracion = useCallback(async () => {
+    const response = await api.get("/configuracion");
+    setConfiguracion(response.data || null);
+    return response.data;
+  }, []);
+
+  const updateConfiguracion = useCallback(async (updates) => {
+    const response = await api.put("/configuracion", updates);
+    setConfiguracion(response.data || null);
+    await loadData();
+    return response.data;
+  }, []);
 
   const addPersona = async (persona) => {
     await api.post("/personas", {
@@ -165,16 +186,19 @@ export function DataProvider({ children }) {
   const addMovimiento = async (movimiento) => {
     await api.post("/movimientos", normalizeMovimientoPayload(movimiento));
     await loadData();
+    bumpMovimientosVersion();
   };
 
   const updateMovimiento = async (id, updates) => {
     await api.put(`/movimientos/${id}`, normalizeMovimientoPayload(updates));
     await loadData();
+    bumpMovimientosVersion();
   };
 
   const deleteMovimiento = async (id) => {
     await api.delete(`/movimientos/${id}`);
     await loadData();
+    bumpMovimientosVersion();
   };
 
   const addMensualidad = async (mensualidad) => {
@@ -242,12 +266,16 @@ export function DataProvider({ children }) {
         movimientos,
         conceptos,
         caja,
+        configuracion,
+        movimientosVersion,
         mensualidades,
         ahorros,
         loading,
         error,
         reloadData,
         getMensualidadesResumen,
+        getConfiguracion,
+        updateConfiguracion,
         getConceptosByType: (tipo) => conceptos.filter((concepto) => concepto.tipo === tipo),
         addPersona,
         updatePersona,
