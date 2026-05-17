@@ -1,3 +1,4 @@
+const { get } = require('./persona.routes');
 const personaService = require('./persona.service');
 
 const createPersona = async (req, res) => {
@@ -45,9 +46,19 @@ const updatePersona = async (req, res) => {
   } 
 };
 
+const getEstadoPersona = async (req, res) => {
+  try {
+    const estado = await personaService.getEstadoPersona(req.params.id);
+    res.status(200).json(estado);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching estado de persona' });
+  }
+};
+
 module.exports = {
   createPersona,
   getPersonas,
   getPersonaById,
-  updatePersona
+  updatePersona,
+  getEstadoPersona,
 };

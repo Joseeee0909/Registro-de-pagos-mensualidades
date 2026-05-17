@@ -28,9 +28,73 @@ const updatePersona = async (id, data) => {
   });
 }
 
+const getEstadoPersona = async (personaId) => {
+
+  const persona = await prisma.persona.findUnique({
+    where: {
+      id: Number(personaId),
+    },
+
+    include: {
+      movimientos: {
+        include: {
+          concepto: true,
+        },
+      },
+    },
+  });
+
+  if (!persona) {
+    throw new Error("Persona no encontrada");
+  }
+
+  const mensualidad = 25000;
+
+  const resumenMensualidades = {};
+
+  persona.movimientos.forEach((movimiento) => {
+
+    if (
+      movimiento.tipo === "INGRESO" &&
+      movimiento.concepto.esMensualidad &&
+      movimiento.mes &&
+      movimiento.anio
+    ) {
+
+      const key = `${movimiento.mes}-${movimiento.anio}`;
+
+      if (!resumenMensualidades[key]) {
+        resumenMensualidades[key] = 0;
+      }
+
+      resumenMensualidades[key] += Number(movimiento.valor);
+    }
+  });
+
+  return {
+    id: persona.id,
+    nombre: persona.nombre,
+
+
+    mensualidades: Object.entries(resumenMensualidades).map(
+      ([periodo, totalPagado]) => ({
+        periodo,
+        totalPagado,
+
+        deuda: mensualidad - totalPagado,
+
+        estado:
+          totalPagado >= mensualidad
+            ? "PAGADO"
+            : "PENDIENTE",
+      })
+    ),
+  };
+};
 module.exports = {
   createPersona,
   getPersonas,
   getPersonaById, 
-  updatePersona
+  updatePersona,
+  getEstadoPersona,
 };

@@ -11,9 +11,9 @@ const createMovimiento = async (data) => {
 
       valor: data.valor,
 
-      mesCorrespondiente: data.mesCorrespondiente
-        ? new Date(data.mesCorrespondiente)
-        : null,
+      mes: data.mes || null,
+
+      anio: data.anio || null,
 
       observacion: data.observacion || null,
     },
