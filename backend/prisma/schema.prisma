@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+
+}
+
+model Persona {
+  id              Int           @id @default(autoincrement())
+
+  nombre          String
+  telefono        String?
+
+  activa          Boolean       @default(true)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  movimientos     Movimiento[]
+}
+
+model Concepto {
+  id                Int              @id @default(autoincrement())
+
+  nombre            String           @unique
+
+  tipo              TipoConcepto
+
+  esMensualidad     Boolean          @default(false)
+
+  createdAt         DateTime         @default(now())
+
+  movimientos       Movimiento[]
+}
+
+model Movimiento {
+  id                  Int              @id @default(autoincrement())
+
+  personaId           Int?
+  conceptoId          Int
+
+  tipo                TipoMovimiento
+
+  valor               Decimal @db.Decimal(10, 2)
+  fecha               DateTime         @default(now())
+
+  mesCorrespondiente  String?
+
+  observacion         String?
+
+  createdAt           DateTime         @default(now())
+
+  persona             Persona?         @relation(fields: [personaId], references: [id])
+  concepto            Concepto         @relation(fields: [conceptoId], references: [id])
+}
+
+model Configuracion {
+  id                  Int       @id @default(autoincrement())
+
+  mensualidadGeneral  Decimal   @db.Decimal(10,2)
+
+  updatedAt           DateTime  @updatedAt
+}
+
+enum TipoConcepto {
+  MENSUALIDAD
+  AHORRO
+  EGRESO
+  PRODUCTO
+}
+enum TipoMovimiento {
+  INGRESO
+  EGRESO
+}
