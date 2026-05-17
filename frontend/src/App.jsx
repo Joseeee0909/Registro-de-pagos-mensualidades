@@ -1,19 +1,32 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+
+import { DataProvider } from "./context/DataContext";
+import MainLayout from "./components/layouts/MainLayout";
+
+import DashboardPage from "./pages/DashboardPage";
+import PersonasPage from "./pages/PersonasPage";
+import MovimientosPage from "./pages/MovimientosPage";
+import MensualidadesPage from "./pages/MensualidadesPage";
+import AhorrosPage from "./pages/AhorrosPage";
+import ReportesPage from "./pages/ReportesPage";
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <h1 className='text-3xl font-bold underline' >app </h1>
-
-
-  )
-    
+    <DataProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<MainLayout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="personas" element={<PersonasPage />} />
+            <Route path="movimientos" element={<MovimientosPage />} />
+            <Route path="mensualidades" element={<MensualidadesPage />} />
+            <Route path="ahorros" element={<AhorrosPage />} />
+            <Route path="reportes" element={<ReportesPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </DataProvider>
+  );
 }
 
-
-export default App
+export default App;
