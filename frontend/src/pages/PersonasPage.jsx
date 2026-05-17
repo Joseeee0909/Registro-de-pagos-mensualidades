@@ -9,6 +9,9 @@ export default function PersonasPage() {
   const [editingPersona, setEditingPersona] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({ nombre: "", telefono: "", activa: true });
+  const [search, setSearch] = useState("");
+  const [estadoFiltro, setEstadoFiltro] = useState("TODAS");
+  const [orden, setOrden] = useState("NOMBRE_ASC");
 
   const activasCount = useMemo(
     () => personas.filter((persona) => persona.activa).length,
@@ -16,6 +19,28 @@ export default function PersonasPage() {
   );
 
   const inactivasCount = personas.length - activasCount;
+
+  const filteredPersonas = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const sorted = [...personas].sort((a, b) => {
+      const [aNombre, ...aRest] = (a.nombre || "").trim().split(/\s+/);
+      const [bNombre, ...bRest] = (b.nombre || "").trim().split(/\s+/);
+      const aApellido = aRest.join(" ");
+      const bApellido = bRest.join(" ");
+
+      if (orden === "NOMBRE_ASC") return aNombre.localeCompare(bNombre, "es");
+      if (orden === "NOMBRE_DESC") return bNombre.localeCompare(aNombre, "es");
+      if (orden === "APELLIDO_ASC") return aApellido.localeCompare(bApellido, "es");
+      return bApellido.localeCompare(aApellido, "es");
+    });
+
+    return sorted.filter((persona) => {
+      const matchEstado = estadoFiltro === "TODAS" ? true : estadoFiltro === "ACTIVAS" ? persona.activa : !persona.activa;
+      if (!matchEstado) return false;
+      if (!query) return true;
+      return [persona.nombre, persona.telefono].some((v) => String(v || "").toLowerCase().includes(query));
+    });
+  }, [personas, search, estadoFiltro, orden]);
 
   const handleOpenDialog = (persona) => {
     if (persona) {
@@ -84,6 +109,19 @@ export default function PersonasPage() {
         <MiniCard label="Inactivas" value={inactivasCount} valueClassName="text-gray-500" />
       </div>
 
+
+      <div className="grid grid-cols-1 gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre o teléfono..." className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
+        <select value={estadoFiltro} onChange={(event) => setEstadoFiltro(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500">
+          <option value="TODAS">Todas</option><option value="ACTIVAS">Activas</option><option value="INACTIVAS">Inactivas</option>
+        </select>
+        <select value={orden} onChange={(event) => setOrden(event.target.value)} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500">
+          <option value="NOMBRE_ASC">Nombre (A-Z)</option><option value="NOMBRE_DESC">Nombre (Z-A)</option>
+          <option value="APELLIDO_ASC">Apellido (A-Z)</option><option value="APELLIDO_DESC">Apellido (Z-A)</option>
+        </select>
+        <div className="flex items-center justify-end text-sm text-gray-500">{filteredPersonas.length} resultado(s)</div>
+      </div>
+
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-5">
           <h2 className="text-lg font-semibold text-gray-900">Lista de Personas</h2>
@@ -101,7 +139,7 @@ export default function PersonasPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {personas.map((persona) => (
+              {filteredPersonas.map((persona) => (
                 <tr key={persona.id}>
                   <td className="px-5 py-4 font-medium text-gray-900">{persona.nombre}</td>
                   <td className="px-5 py-4 text-gray-600">{persona.telefono || "-"}</td>
