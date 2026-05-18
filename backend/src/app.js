@@ -1,6 +1,9 @@
 const express = require("express");
 const cors = require("cors");
 
+const dotenv = require("dotenv");
+dotenv.config();
+
 const personaRoutes = require("./modules/personas/persona.routes");
 const conceptoRoutes = require("./modules/concepto/concepto.routes");
 const movimientoRoutes = require("./modules/movimientos/movimiento.routes");
@@ -10,8 +13,12 @@ const configuracionRoutes = require("./modules/configuracion/configuracion.route
 
 const app = express();
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
+const corsOptions = {
+  origin: process.env.REACT_APP_API_BASE_URL, // <--- AQUÍ PONES LA URL DE TU FRONTEND DESPLEGADO
+  optionsSuccessStatus: 200
+};
 
 app.use("/api/personas", personaRoutes);
 app.use("/api/conceptos", conceptoRoutes);
