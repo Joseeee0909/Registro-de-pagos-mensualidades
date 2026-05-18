@@ -23,8 +23,6 @@ lerna-debug.log*
 !.env.example
 *.local
 
-# Prisma / generated code
-/prisma/migrations/
 
 # Editor and OS files
 .vscode/*
