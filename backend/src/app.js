@@ -10,15 +10,15 @@ const movimientoRoutes = require("./modules/movimientos/movimiento.routes");
 const reporteRoutes = require("./modules/reportes/reporte.routes");
 const configuracionRoutes = require("./modules/configuracion/configuracion.routes");
 
+const corsOptions = {
+  origin: process.env.REACT_APP_API_BASE_URL, // <--- AQUÍ PONES LA URL DE TU FRONTEND DESPLEGADO
+  optionsSuccessStatus: 200
+};
 
 const app = express();
 
 app.use(cors(corsOptions));
 app.use(express.json());
-const corsOptions = {
-  origin: process.env.REACT_APP_API_BASE_URL, // <--- AQUÍ PONES LA URL DE TU FRONTEND DESPLEGADO
-  optionsSuccessStatus: 200
-};
 
 app.use("/api/personas", personaRoutes);
 app.use("/api/conceptos", conceptoRoutes);
