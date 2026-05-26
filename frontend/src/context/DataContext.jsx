@@ -221,11 +221,17 @@ export function DataProvider({ children }) {
   };
 
   const updateMensualidad = async (id, updates) => {
+    const conceptoId = getConceptoIdByType(conceptoIndex, "MENSUALIDAD");
+
+    if (!conceptoId) {
+      throw new Error("No hay conceptos de mensualidad disponibles");
+    }
+
     await updateMovimiento(id, {
       fecha: updates.fecha,
       tipo: "INGRESO",
       valor: updates.monto,
-      conceptoId: updates.conceptoId,
+      conceptoId,
       personaId: updates.personaId,
       mes: updates.mes ? monthNameToNumber(updates.mes) : updates.mes,
       anio: updates.anio,
