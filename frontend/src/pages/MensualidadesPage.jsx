@@ -120,6 +120,8 @@ export default function MensualidadesPage() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
+  const [isFormatHelpOpen, setIsFormatHelpOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isImportReviewOpen, setIsImportReviewOpen] = useState(false);
@@ -409,9 +411,8 @@ export default function MensualidadesPage() {
     downloadWorkbook(workbook, `mensualidades-${year}.xlsx`);
   };
 
-  const handleDownloadTemplate = () => {
-    const workbook = buildMensualidadesTemplateWorkbook();
-    downloadWorkbook(workbook, "plantilla-importacion-mensualidades.xlsx");
+  const handleTemplateHelp = () => {
+    setIsFormatHelpOpen(true);
   };
 
   const handleImportClick = () => {
@@ -592,8 +593,8 @@ export default function MensualidadesPage() {
             <ActionButton onClick={handleExportExcel} icon={Download}>
               Exportar Excel
             </ActionButton>
-            <ActionButton onClick={handleDownloadTemplate} icon={CheckCircle2}>
-              Descargar plantilla
+            <ActionButton onClick={handleTemplateHelp} icon={CheckCircle2}>
+              Formato de importación
             </ActionButton>
             <ActionButton onClick={handleImportClick} icon={Upload} disabled={isImporting}>
               {isImporting ? "Procesando..." : "Importar Excel"}
@@ -863,15 +864,118 @@ export default function MensualidadesPage() {
 
       <button
         type="button"
-        onClick={() => {
-          searchInputRef.current?.focus();
-          searchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }}
+        onClick={() => setIsQuickSearchOpen(true)}
         className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-700 md:hidden"
       >
         <Search className="h-4 w-4" />
         Buscar
       </button>
+
+      <Modal
+        open={isQuickSearchOpen}
+        onClose={() => setIsQuickSearchOpen(false)}
+        title="Buscar y filtrar"
+        description="Ajusta la vista sin subir al inicio"
+      >
+        <div className="grid gap-4">
+          <Field label="Buscar persona" value={searchPersona} onChange={(value) => setSearchPersona(value)} placeholder="Escribe el nombre" />
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <SelectField
+              label="Estado"
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value)}
+              options={[
+                "TODOS",
+                "PAGADO",
+                "PARCIAL",
+                "EXCENTO",
+                "PENDIENTE",
+              ]}
+              optionLabels={{
+                TODOS: "Todos los estados",
+                PAGADO: "Pagado",
+                PARCIAL: "Parcial",
+                EXCENTO: "Exento",
+                PENDIENTE: "No pagado",
+              }}
+            />
+
+            <SelectField
+              label="Mes"
+              value={monthFilter}
+              onChange={(value) => setMonthFilter(value)}
+              options={["TODOS", ...months.map((month) => String(month.key))]}
+              optionLabels={{
+                TODOS: "Todos los meses",
+                ...Object.fromEntries(months.map((month) => [String(month.key), month.label])),
+              }}
+            />
+          </div>
+
+          <SelectField
+            label="Orden"
+            value={sortBy}
+            onChange={(value) => setSortBy(value)}
+            options={[
+              "NOMBRE_ASC",
+              "NOMBRE_DESC",
+              "TOTAL_DESC",
+              "TOTAL_ASC",
+              "PENDIENTES_DESC",
+              "EXENTAS_DESC",
+            ]}
+            optionLabels={{
+              NOMBRE_ASC: "Nombre A-Z",
+              NOMBRE_DESC: "Nombre Z-A",
+              TOTAL_DESC: "Total mayor",
+              TOTAL_ASC: "Total menor",
+              PENDIENTES_DESC: "Más pendientes",
+              EXENTAS_DESC: "Más exentas",
+            }}
+          />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => setIsQuickSearchOpen(false)} className="rounded-2xl border border-slate-200 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50">
+              Listo
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={isFormatHelpOpen}
+        onClose={() => setIsFormatHelpOpen(false)}
+        title="Formato de importación"
+        description="La importación acepta dos formatos"
+      >
+        <div className="grid gap-4 text-sm text-slate-700">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <h4 className="font-semibold text-slate-900">1. Formato simple</h4>
+            <p className="mt-1">Persona, mes, año, monto y observación. Sirve si quieres importar filas una por una.</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <h4 className="font-semibold text-slate-900">2. Formato ancho</h4>
+            <p className="mt-1">APELLIDO, NOMBRES y columnas por mes. Es el formato ideal para el archivo que ya usas en la práctica.</p>
+          </div>
+
+          <p className="text-slate-600">Si tu Excel ya viene como el de la captura, no necesitas rellenar una plantilla: usa Importar Excel directamente.</p>
+
+          <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setIsFormatHelpOpen(false)} className="rounded-2xl border border-slate-200 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50">
+              Cerrar
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadWorkbook(buildMensualidadesTemplateWorkbook(), "ejemplo-importacion-mensualidades.xlsx")}
+              className="rounded-2xl bg-sky-600 px-4 py-3 font-semibold text-white transition hover:bg-sky-700"
+            >
+              Descargar ejemplo simple
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={isDialogOpen}
@@ -1107,6 +1211,26 @@ function Field({ label, value, onChange, type = "text", step, disabled = false, 
         required={required}
         className="rounded-2xl border border-slate-200 px-4 py-3 text-base outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-500"
       />
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, options, optionLabels = {}, placeholder = "Seleccione" }) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <select
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-2xl border border-slate-200 px-4 py-3 text-base outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {optionLabels[option] || option}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }
