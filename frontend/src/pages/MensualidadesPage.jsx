@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertCircle, CheckCircle2, Download, Search, Smartphone, Upload, Zap } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Download, Search, Smartphone, Upload, Zap } from "lucide-react";
 
 import api from "../api/api";
 import Modal from "../components/Modal";
@@ -110,6 +110,7 @@ export default function MensualidadesPage() {
   const clickTimerRef = useRef(null);
   const searchInputRef = useRef(null);
   const refreshTimerRef = useRef(null);
+  const [scrollY, setScrollY] = useState(0);
 
   const [year, setYear] = useState(DEFAULT_YEAR);
   const [resumen, setResumen] = useState(null);
@@ -203,6 +204,19 @@ export default function MensualidadesPage() {
     }
   }, []);
 
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrollY(window.scrollY || 0);
+    };
+
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   const months = resumen?.months || MONTHS;
   const rows = resumen?.rows || [];
   const monthlyFee = Number(resumen?.monthlyFee || 25000);
@@ -252,6 +266,7 @@ export default function MensualidadesPage() {
   }, [filteredRows, sortBy]);
 
   const totalDeTotales = useMemo(() => visibleRows.reduce((sum, row) => sum + Number(row.rowTotal || 0), 0), [visibleRows]);
+  const isNearTop = scrollY < 240;
 
   const openDialog = useCallback(
     (persona, month, latestPayment = null) => {
@@ -417,6 +432,15 @@ export default function MensualidadesPage() {
 
   const handleImportClick = () => {
     importInputRef.current?.click();
+  };
+
+  const handleFloatingNav = () => {
+    if (isNearTop) {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+      return;
+    }
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleImportFileChange = async (event) => {
@@ -862,14 +886,26 @@ export default function MensualidadesPage() {
         </div>
       </section>
 
-      <button
-        type="button"
-        onClick={() => setIsQuickSearchOpen(true)}
-        className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-700 md:hidden"
-      >
-        <Search className="h-4 w-4" />
-        Buscar
-      </button>
+      <div className="fixed bottom-5 right-5 z-30 flex flex-col items-end gap-3">
+        <button
+          type="button"
+          onClick={() => setIsQuickSearchOpen(true)}
+          className="inline-flex items-center gap-2 rounded-full bg-slate-800 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-500/25 transition hover:bg-slate-900"
+        >
+          <Search className="h-4 w-4" />
+          Buscar
+        </button>
+
+        <button
+          type="button"
+          onClick={handleFloatingNav}
+          className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-sky-600 text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-700"
+          title={isNearTop ? "Ir al final" : "Volver al inicio"}
+          aria-label={isNearTop ? "Ir al final" : "Volver al inicio"}
+        >
+          {isNearTop ? <ChevronDown className="h-6 w-6" /> : <ChevronUp className="h-6 w-6" />}
+        </button>
+      </div>
 
       <Modal
         open={isQuickSearchOpen}
