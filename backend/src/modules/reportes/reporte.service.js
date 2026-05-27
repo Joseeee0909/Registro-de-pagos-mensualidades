@@ -121,7 +121,8 @@ const getMensualidadesResumen = async (anio) => {
 
   const totalPaid = rows.reduce((sum, row) => sum + Number(row.rowTotal || 0), 0);
   const paidCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.totalPaid >= Number(mensualidadBase)).length, 0);
-  const pendingCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.totalPaid < Number(mensualidadBase)).length, 0);
+  const exemptCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.status === "EXCENTO").length, 0);
+  const pendingCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.status === "PENDIENTE").length, 0);
 
   return {
     year,
@@ -131,6 +132,7 @@ const getMensualidadesResumen = async (anio) => {
     stats: {
       paidCount,
       pendingCount,
+      exemptCount,
       totalPaid,
       totalExpected: rows.length * 12 * Number(mensualidadBase),
     },
@@ -155,7 +157,30 @@ function createCellSummary(monthlyFee = DEFAULT_MONTHLY_FEE) {
   };
 }
 
+function isExentoMensualidadMovimiento(movimiento) {
+  const observacion = String(movimiento?.observacion || "").trim().toUpperCase();
+  return observacion.startsWith("EXENTO:") || observacion.startsWith("EXCENTO:");
+}
+
 function allocateMensualidadPayment(personMonths, entry, monthlyFee) {
+  if (isExentoMensualidadMovimiento(entry)) {
+    const month = clampMonth(entry.mes || 1);
+    const current = personMonths.get(month) || createCellSummary(monthlyFee);
+
+    current.totalPaid = 0;
+    current.remaining = 0;
+    current.status = "EXCENTO";
+    current.latestPayment = pickLatestPayment(current.latestPayment, entry);
+    current.payments.push({
+      ...entry,
+      appliedAmount: 0,
+      allocatedMonth: month,
+    });
+
+    personMonths.set(month, current);
+    return;
+  }
+
   let remaining = Number(entry.valor || 0);
   const startMonth = clampMonth(entry.mes || 1);
 

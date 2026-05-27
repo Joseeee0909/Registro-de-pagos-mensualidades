@@ -27,8 +27,9 @@ function validateMovimientoPayload(data) {
   }
 
   const valor = Number(data.valor);
+  const isExemptMonthly = isMensualidadPayload(data) && isExentoMovimiento(data);
 
-  if (!Number.isFinite(valor) || valor <= 0) {
+  if (!Number.isFinite(valor) || valor < 0 || (!isExemptMonthly && valor <= 0)) {
     throw createValidationError("El monto debe ser mayor a 0");
   }
 
@@ -73,6 +74,11 @@ async function ensureNoDuplicateMensualidad(data, excludeId = null) {
 
 function isMensualidadPayload(data) {
   return Boolean(data && data.mes !== undefined && data.mes !== null && data.anio !== undefined && data.anio !== null);
+}
+
+function isExentoMovimiento(data) {
+  const observacion = String(data?.observacion || "").trim().toUpperCase();
+  return observacion.startsWith("EXENTO:") || observacion.startsWith("EXCENTO:");
 }
 
 const createMovimiento = async (data) => {

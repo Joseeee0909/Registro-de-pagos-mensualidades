@@ -10,9 +10,24 @@ const movimientoRoutes = require("./modules/movimientos/movimiento.routes");
 const reporteRoutes = require("./modules/reportes/reporte.routes");
 const configuracionRoutes = require("./modules/configuracion/configuracion.routes");
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.REACT_APP_API_BASE_URL,
+  "http://localhost:5173",
+  "http://localhost:4173",
+  "http://localhost:3000",
+].filter(Boolean);
+
 const corsOptions = {
-  origin: process.env.REACT_APP_API_BASE_URL, // <--- AQUÍ PONES LA URL DE TU FRONTEND DESPLEGADO
-  optionsSuccessStatus: 200
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origen no permitido por CORS: ${origin}`));
+  },
+  optionsSuccessStatus: 200,
 };
 
 const app = express();

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertCircle, CheckCircle2, Download, Smartphone, Upload, Zap } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Search, Smartphone, Upload, Zap } from "lucide-react";
 
 import api from "../api/api";
 import Modal from "../components/Modal";
@@ -53,6 +53,45 @@ const MONTH_ALIASES = {
   diciembre: 12,
 };
 
+const NON_PAYMENT_STATES = new Set([
+  "viaje",
+  "incapacidad",
+  "incp",
+  "inc",
+  "exento",
+  "excento",
+  "vacaciones",
+  "suspendido",
+  "exonerado",
+  "licencia",
+]);
+
+const NON_PAYMENT_DISPLAY = {
+  incp: "Incapacidad",
+  inc: "Incapacidad",
+  incapacidad: "Incapacidad",
+  exento: "Exento",
+  excento: "Exento",
+  viaje: "Viaje",
+  vacaciones: "Vacaciones",
+  suspendido: "Suspendido",
+  exonerado: "Exonerado",
+  licencia: "Licencia",
+};
+
+function extractNonPaymentStateFromObservacion(observacion) {
+  if (!observacion) return null;
+  const match = String(observacion || "").match(/Estado:\s*(.+)/i);
+  const raw = match ? match[1].trim() : String(observacion).trim();
+  const key = normalizeHeader(raw);
+  if (!key) return null;
+  if (NON_PAYMENT_STATES.has(key)) {
+    return NON_PAYMENT_DISPLAY[key] || raw.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  return null;
+}
+
 export default function MensualidadesPage() {
   const {
     movimientosVersion,
@@ -69,6 +108,8 @@ export default function MensualidadesPage() {
   } = useData();
   const importInputRef = useRef(null);
   const clickTimerRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const refreshTimerRef = useRef(null);
 
   const [year, setYear] = useState(DEFAULT_YEAR);
   const [resumen, setResumen] = useState(null);
@@ -89,10 +130,15 @@ export default function MensualidadesPage() {
   const [searchPersona, setSearchPersona] = useState("");
   const [statusFilter, setStatusFilter] = useState("TODOS");
   const [monthFilter, setMonthFilter] = useState("TODOS");
+  const [sortBy, setSortBy] = useState("NOMBRE_ASC");
 
   const loadResumen = useCallback(
-    async (targetYear = year) => {
-      setLoadingResumen(true);
+    async (targetYear = year, options = {}) => {
+      const silent = Boolean(options.silent);
+
+      if (!silent) {
+        setLoadingResumen(true);
+      }
       setErrorResumen("");
 
       try {
@@ -101,15 +147,36 @@ export default function MensualidadesPage() {
       } catch (error) {
         setErrorResumen(error?.message || "No se pudo cargar el resumen de mensualidades");
       } finally {
-        setLoadingResumen(false);
+        if (!silent) {
+          setLoadingResumen(false);
+        }
       }
     },
     [getMensualidadesResumen, year],
   );
 
+  const refreshResumen = useCallback(
+    (targetYear = year) => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+
+      refreshTimerRef.current = setTimeout(() => {
+        void loadResumen(targetYear, { silent: true });
+      }, 180);
+    },
+    [loadResumen, year],
+  );
+
   useEffect(() => {
     loadResumen(year);
-  }, [loadResumen, year, movimientosVersion]);
+  }, [loadResumen, year]);
+
+  useEffect(() => {
+    if (movimientosVersion > 0) {
+      refreshResumen(year);
+    }
+  }, [movimientosVersion, refreshResumen, year]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -128,12 +195,16 @@ export default function MensualidadesPage() {
     if (clickTimerRef.current) {
       clearTimeout(clickTimerRef.current);
     }
+
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
   }, []);
 
   const months = resumen?.months || MONTHS;
   const rows = resumen?.rows || [];
   const monthlyFee = Number(resumen?.monthlyFee || 25000);
-  const stats = resumen?.stats || { paidCount: 0, pendingCount: 0, totalPaid: 0 };
+  const stats = resumen?.stats || { paidCount: 0, pendingCount: 0, exemptCount: 0, totalPaid: 0 };
   const monthlyConceptId = Number(getConceptosByType("MENSUALIDAD")?.[0]?.id || 0);
 
   const filteredRows = useMemo(() => {
@@ -149,27 +220,50 @@ export default function MensualidadesPage() {
       if (statusFilter === "TODOS") return true;
 
       return cells.some((cell) => {
+        const isExempt = String(cell.status || "").toUpperCase() === "EXCENTO";
         const paid = Number(cell.totalPaid || 0);
         const isPartial = paid > 0 && paid < monthlyFee;
         const isComplete = paid >= monthlyFee;
 
         if (statusFilter === "PAGADO") return isComplete;
         if (statusFilter === "PARCIAL") return isPartial;
+        if (statusFilter === "EXCENTO") return isExempt;
         return paid === 0;
       });
     });
   }, [rows, searchPersona, statusFilter, monthFilter, monthlyFee]);
+
+  const visibleRows = useMemo(() => {
+    const rowsCopy = [...filteredRows];
+
+    const sorters = {
+      NOMBRE_ASC: (left, right) => left.persona.nombre.localeCompare(right.persona.nombre, "es"),
+      NOMBRE_DESC: (left, right) => right.persona.nombre.localeCompare(left.persona.nombre, "es"),
+      TOTAL_DESC: (left, right) => Number(right.rowTotal || 0) - Number(left.rowTotal || 0),
+      TOTAL_ASC: (left, right) => Number(left.rowTotal || 0) - Number(right.rowTotal || 0),
+      PENDIENTES_DESC: (left, right) => countCellsByStatus(right, "PENDIENTE") - countCellsByStatus(left, "PENDIENTE"),
+      EXENTAS_DESC: (left, right) => countCellsByStatus(right, "EXCENTO") - countCellsByStatus(left, "EXCENTO"),
+    };
+
+    rowsCopy.sort(sorters[sortBy] || sorters.NOMBRE_ASC);
+    return rowsCopy;
+  }, [filteredRows, sortBy]);
+
+  const totalDeTotales = useMemo(() => visibleRows.reduce((sum, row) => sum + Number(row.rowTotal || 0), 0), [visibleRows]);
 
   const openDialog = useCallback(
     (persona, month, latestPayment = null) => {
       setFormError("");
       setSelectedCell({ persona, month });
       setEditingMensualidad(latestPayment);
+      const existingExemptState = extractNonPaymentStateFromObservacion(latestPayment?.observacion);
       setFormData({
         personaId: String(persona.id),
         mes: String(month.key),
         anio: String(year),
         monto: latestPayment ? String(latestPayment.valor ?? latestPayment.monto ?? "") : String(monthlyFee || ""),
+        exentoPago: Boolean(existingExemptState),
+        motivoExento: existingExemptState ? normalizeHeader(existingExemptState) : "viaje",
       });
       setIsDialogOpen(true);
     },
@@ -200,12 +294,12 @@ export default function MensualidadesPage() {
           await addMensualidad(payload);
         }
 
-        await loadResumen(year);
+        refreshResumen(year);
       } catch (error) {
         setFormError(error?.response?.data?.error || error?.message || "No se pudo registrar el pago automático");
       }
     },
-    [addMensualidad, loadResumen, monthlyConceptId, monthlyFee, updateMensualidad, year],
+    [addMensualidad, monthlyConceptId, monthlyFee, refreshResumen, updateMensualidad, year],
   );
 
   const handleCellClick = useCallback(
@@ -238,7 +332,7 @@ export default function MensualidadesPage() {
     event.preventDefault();
     setFormError("");
 
-    if (!formData.personaId || !formData.mes || !formData.anio || !formData.monto) {
+    if (!formData.personaId || !formData.mes || !formData.anio || (!formData.exentoPago && !formData.monto)) {
       setFormError("Completa persona, mes, año y monto antes de guardar");
       return;
     }
@@ -249,8 +343,10 @@ export default function MensualidadesPage() {
       personaId: Number(formData.personaId),
       mes: Number(formData.mes),
       anio: Number(formData.anio),
-      monto: Number(formData.monto),
-      observacion: `Mensualidad ${monthLabel(Number(formData.mes))} ${formData.anio}`,
+      monto: formData.exentoPago ? 0 : Number(formData.monto),
+      observacion: formData.exentoPago
+        ? `EXENTO: ${String(formData.motivoExento || "viaje").toUpperCase()}`
+        : `Mensualidad ${monthLabel(Number(formData.mes))} ${formData.anio}`,
     };
 
     try {
@@ -260,7 +356,7 @@ export default function MensualidadesPage() {
         await addMensualidad(payload);
       }
 
-      await loadResumen(year);
+      refreshResumen(year);
       setIsDialogOpen(false);
     } catch (submitError) {
       setFormError(submitError?.response?.data?.error || submitError?.message || "No se pudo guardar la mensualidad");
@@ -274,7 +370,7 @@ export default function MensualidadesPage() {
 
     try {
       await deleteMovimiento(editingMensualidad.id);
-      await loadResumen(year);
+      refreshResumen(year);
       setIsDialogOpen(false);
     } catch (error) {
       setFormError(error?.response?.data?.error || error?.message || "No se pudo eliminar la mensualidad");
@@ -294,7 +390,7 @@ export default function MensualidadesPage() {
     try {
       const config = await updateConfiguracion({ mensualidadGeneral: Number(monthlyFeeForm) });
       setMonthlyFeeForm(String(config?.mensualidadGeneral || monthlyFeeForm));
-      await loadResumen(year);
+      refreshResumen(year);
       setIsConfigOpen(false);
       setFormError("");
     } finally {
@@ -344,6 +440,7 @@ export default function MensualidadesPage() {
 
       const worksheet = workbook.Sheets[firstSheetName];
       const sheetRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      const sheetMatrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
 
       if (!sheetRows.length) {
         throw new Error("La hoja seleccionada está vacía");
@@ -355,6 +452,8 @@ export default function MensualidadesPage() {
 
       const plan = buildMensualidadImportPlan({
         sheetRows,
+        sheetMatrix,
+        sheetName: firstSheetName,
         personas,
         movimientos,
         defaultYear: year,
@@ -384,16 +483,59 @@ export default function MensualidadesPage() {
     setFormError("");
 
     try {
-      for (const record of importState.records) {
-        if (record.method === "update") {
-          await api.put(`/movimientos/${record.id}`, record.payload);
-        } else {
-          await api.post("/movimientos", record.payload);
+        // Create any missing personas first on-the-fly, reusing created IDs to avoid duplicates.
+        const createdPersonByName = new Map();
+
+        for (const record of importState.records) {
+          if (record.newPersona) {
+            const nameKey = normalizeHeader(record.newPersona.nombre);
+            if (createdPersonByName.has(nameKey)) {
+              record.payload.personaId = createdPersonByName.get(nameKey);
+            } else {
+              // create persona with empty telefono
+              const resp = await api.post("/personas", {
+                nombre: record.newPersona.nombre,
+                telefono: record.newPersona.telefono || null,
+                activa: true,
+              });
+              const created = resp.data;
+              const createdId = created?.id ?? created?.data?.id ?? null;
+              if (!createdId) {
+                throw new Error(`No se pudo crear persona ${record.newPersona.nombre}`);
+              }
+
+              record.payload.personaId = Number(createdId);
+              createdPersonByName.set(nameKey, Number(createdId));
+            }
+          }
+
+          // Ensure payload has conceptoId for mensualidad imports and a default tipo.
+          if (!record.payload.conceptoId) {
+            record.payload.conceptoId = monthlyConceptId || record.payload.conceptoId || null;
+          }
+          if (!record.payload.tipo) {
+            record.payload.tipo = record.payload.tipo || "INGRESO";
+          }
+
+          if (!record.payload.conceptoId) {
+            throw new Error("Debes seleccionar un concepto de mensualidad en la configuración antes de importar.");
+          }
+
+          const payloadToSend = {
+            ...record.payload,
+            valor: Number(record.payload.valor ?? record.payload.monto ?? record.amount ?? 0),
+          };
+          delete payloadToSend.monto;
+
+          if (record.method === "update") {
+            await api.put(`/movimientos/${record.id}`, payloadToSend);
+          } else {
+            await api.post("/movimientos", payloadToSend);
+          }
         }
-      }
 
       await reloadData();
-      await loadResumen(year);
+      refreshResumen(year);
       setIsImportReviewOpen(false);
       setImportState(null);
     } catch (error) {
@@ -430,6 +572,7 @@ export default function MensualidadesPage() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <MiniCard label="Pagadas" value={stats.paidCount} valueClassName="text-emerald-600" />
             <MiniCard label="Pendientes" value={Math.max(stats.pendingCount, 0)} valueClassName="text-amber-600" />
+            <MiniCard label="Exentas" value={stats.exemptCount || 0} valueClassName="text-sky-600" />
             <MiniCard label="Monto pagado" value={formatCurrency(stats.totalPaid)} valueClassName="text-sky-600" />
           </div>
         </div>
@@ -464,11 +607,12 @@ export default function MensualidadesPage() {
         <input ref={importInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportFileChange} />
       </section>
 
-      <section className="grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4 md:gap-4 md:p-5">
+      <section className="grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-5 md:gap-4 md:p-5">
         <input
           value={searchPersona}
           onChange={(event) => setSearchPersona(event.target.value)}
           placeholder="Buscar persona..."
+          ref={searchInputRef}
           className="rounded-2xl border border-slate-200 px-4 py-3 text-base outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
         />
         <select
@@ -479,6 +623,7 @@ export default function MensualidadesPage() {
           <option value="TODOS">Todos los estados</option>
           <option value="PAGADO">Pagado</option>
           <option value="PARCIAL">Parcial</option>
+          <option value="EXCENTO">Exento</option>
           <option value="PENDIENTE">No pagado</option>
         </select>
         <select
@@ -492,6 +637,18 @@ export default function MensualidadesPage() {
               {month.label}
             </option>
           ))}
+        </select>
+        <select
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value)}
+          className="rounded-2xl border border-slate-200 px-4 py-3 text-base outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+        >
+          <option value="NOMBRE_ASC">Orden: nombre A-Z</option>
+          <option value="NOMBRE_DESC">Orden: nombre Z-A</option>
+          <option value="TOTAL_DESC">Orden: total mayor</option>
+          <option value="TOTAL_ASC">Orden: total menor</option>
+          <option value="PENDIENTES_DESC">Orden: más pendientes</option>
+          <option value="EXENTAS_DESC">Orden: más exentas</option>
         </select>
         <div className="flex items-center justify-end rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600 md:text-base">
           {filteredRows.length} persona(s)
@@ -518,7 +675,7 @@ export default function MensualidadesPage() {
 
         <div className="md:hidden">
           <div className="space-y-4 p-4 sm:p-5">
-            {filteredRows.map((row) => (
+            {visibleRows.map((row) => (
               <article key={row.persona.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -536,8 +693,11 @@ export default function MensualidadesPage() {
                     const paid = Number(cell.totalPaid || 0);
                     const remaining = Number(cell.remaining ?? monthlyFee) || 0;
                     const latestPayment = cell.latestPayment || null;
+                    const cellStatus = String(cell.status || "").toUpperCase();
+                    const isExempt = cellStatus === "EXCENTO";
                     const isPartial = paid > 0 && paid < monthlyFee;
                     const isComplete = paid >= monthlyFee;
+                    const nonPaymentState = extractNonPaymentStateFromObservacion(latestPayment?.observacion || cell.status);
 
                     return (
                       <button
@@ -550,19 +710,34 @@ export default function MensualidadesPage() {
                           "flex min-h-24 w-full flex-col justify-between rounded-2xl border p-3 text-left transition",
                           isComplete
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : isExempt
+                                ? "border-sky-200 bg-sky-50 text-sky-700"
                             : isPartial
                               ? "border-amber-200 bg-amber-50 text-amber-700"
                               : "border-dashed border-slate-200 bg-white text-slate-500",
                         ].join(" ")}
                       >
-                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start justify-between gap-2">
                           <span className="text-base font-black">{cell.month.label}</span>
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-                            {isComplete ? "OK" : isPartial ? "Parcial" : "Pend."}
-                          </span>
+                          {nonPaymentState ? (
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] rounded-full bg-rose-50 px-2 py-1 text-rose-700">
+                              {nonPaymentState}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+                              {isComplete ? "OK" : isPartial ? "Parcial" : "Pend."}
+                            </span>
+                          )}
                         </div>
                         <div className="mt-3 space-y-1 text-xs font-semibold">
-                          {paid > 0 ? (
+                          {nonPaymentState ? (
+                            <p className="text-rose-700 font-semibold">Estado: {nonPaymentState}</p>
+                          ) : isExempt ? (
+                            <>
+                              <p className="font-semibold">Exento de pago</p>
+                              <p className="text-sky-700/80">No genera saldo pendiente</p>
+                            </>
+                          ) : paid > 0 ? (
                             <>
                               <p>Abonado {formatCurrency(paid)}</p>
                               <p className={isComplete ? "text-emerald-700/80" : "text-amber-700/80"}>Falta {formatCurrency(remaining)}</p>
@@ -580,6 +755,11 @@ export default function MensualidadesPage() {
                 </div>
               </article>
             ))}
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Total de totales</p>
+              <div className="mt-2 text-3xl font-black text-slate-900">{formatCurrency(totalDeTotales)}</div>
+            </div>
           </div>
         </div>
 
@@ -599,7 +779,7 @@ export default function MensualidadesPage() {
               </thead>
 
               <tbody>
-                {filteredRows.map((row) => (
+                {visibleRows.map((row) => (
                   <tr key={row.persona.id} className="hover:bg-slate-50/80">
                     <td className="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-5 py-4 font-semibold text-slate-900">
                       {row.persona.nombre}
@@ -609,8 +789,11 @@ export default function MensualidadesPage() {
                       const paid = Number(cell.totalPaid || 0);
                       const remaining = Number(cell.remaining ?? monthlyFee) || 0;
                       const latestPayment = cell.latestPayment || null;
+                      const cellStatus = String(cell.status || "").toUpperCase();
+                      const isExempt = cellStatus === "EXCENTO";
                       const isPartial = paid > 0 && paid < monthlyFee;
                       const isComplete = paid >= monthlyFee;
+                      const nonPaymentState = extractNonPaymentStateFromObservacion(latestPayment?.observacion || cell.status);
 
                       return (
                         <td key={`${row.persona.id}-${cell.month.key}`} className="border-b border-slate-200 px-2 py-2">
@@ -623,13 +806,19 @@ export default function MensualidadesPage() {
                               "flex min-h-28 w-full flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-center text-sm font-bold transition",
                               isComplete
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                : isExempt
+                                  ? "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
                                 : isPartial
                                   ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
                                   : "border-dashed border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-700",
                             ].join(" ")}
                           >
                             <span className="text-base font-black">{cell.month.label}</span>
-                            {paid > 0 ? (
+                            {nonPaymentState ? (
+                              <span className="text-xs font-semibold uppercase rounded-full bg-rose-50 px-2 py-1 text-rose-700">{nonPaymentState}</span>
+                            ) : isExempt ? (
+                              <span className="text-xs font-semibold uppercase rounded-full bg-sky-50 px-2 py-1 text-sky-700">Exento</span>
+                            ) : paid > 0 ? (
                               <>
                                 <span>Abonado {formatCurrency(paid)}</span>
                                 <span className={isComplete ? "text-emerald-700/80" : "text-amber-700/80"}>Falta {formatCurrency(remaining)}</span>
@@ -651,10 +840,38 @@ export default function MensualidadesPage() {
                   </tr>
                 ))}
               </tbody>
+
+              <tfoot>
+                <tr className="bg-slate-100">
+                  <td className="sticky left-0 z-10 border-t border-r border-slate-200 bg-slate-100 px-5 py-4 text-left text-sm font-black uppercase tracking-[0.18em] text-slate-700">
+                    Total de totales
+                  </td>
+                  {months.map((month) => (
+                    <td key={month.key} className="border-t border-slate-200 px-2 py-4 text-center text-slate-400">
+                      ·
+                    </td>
+                  ))}
+                  <td className="border-t border-l border-slate-200 px-5 py-4 text-center text-xl font-black text-slate-900">
+                    {formatCurrency(totalDeTotales)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
       </section>
+
+      <button
+        type="button"
+        onClick={() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+        className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-sky-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-sky-500/30 transition hover:bg-sky-700 md:hidden"
+      >
+        <Search className="h-4 w-4" />
+        Buscar
+      </button>
 
       <Modal
         open={isDialogOpen}
@@ -670,8 +887,46 @@ export default function MensualidadesPage() {
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Año" value={formData.anio} onChange={(value) => setFormData({ ...formData, anio: value })} type="number" required />
-            <Field label="Monto" value={formData.monto} onChange={(value) => setFormData({ ...formData, monto: value })} type="number" step="0.01" required />
+            <Field
+              label="Monto"
+              value={formData.exentoPago ? "0" : formData.monto}
+              onChange={(value) => setFormData({ ...formData, monto: value })}
+              type="number"
+              step="0.01"
+              required={!formData.exentoPago}
+              disabled={formData.exentoPago}
+            />
           </div>
+
+          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={Boolean(formData.exentoPago)}
+              onChange={(event) =>
+                setFormData((current) => ({
+                  ...current,
+                  exentoPago: event.target.checked,
+                  monto: event.target.checked ? "0" : current.monto || String(monthlyFee || ""),
+                }))
+              }
+              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            />
+            Exento de pago
+          </label>
+
+          {formData.exentoPago ? (
+            <label className="grid gap-2">
+              <span className="text-sm font-semibold text-slate-700">Motivo</span>
+              <select
+                value={formData.motivoExento}
+                onChange={(event) => setFormData({ ...formData, motivoExento: event.target.value })}
+                className="rounded-2xl border border-slate-200 px-4 py-3 text-base outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+              >
+                <option value="viaje">Viaje</option>
+                <option value="incapacidad">Incapacidad</option>
+              </select>
+            </label>
+          ) : null}
 
           <div className="flex items-center justify-between gap-3 pt-2">
             <div>{editingMensualidad ? <DangerButton onClick={handleDelete}>Eliminar</DangerButton> : null}</div>
@@ -734,6 +989,21 @@ export default function MensualidadesPage() {
             </div>
           ) : null}
 
+          {importState?.skippedStates?.length ? (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertCircle className="h-4 w-4" />
+                Algunos estados se importarán como exentos de pago
+              </div>
+              <p className="mt-2 text-xs text-sky-700">Las filas marcadas como viaje/incapacidad se crearán con monto 0 y observación EXENTO. También puedes marcarlas manualmente desde el mes.</p>
+              <ul className="mt-3 space-y-1">
+                {importState.skippedStates.slice(0, 12).map((s, idx) => (
+                  <li key={`${s.rowNumber || idx}-${s.personaName || s.monthLabel}`}>Fila {s.rowNumber || "?"}: {s.personaName} · {s.monthLabel || ""} — {s.state}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="rounded-2xl border border-slate-200 bg-slate-50">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700">
               <span>Vista previa</span>
@@ -781,12 +1051,16 @@ export default function MensualidadesPage() {
 }
 
 function createEmptyForm(year) {
-  return { personaId: "", mes: "", anio: String(year), monto: "" };
+  return { personaId: "", mes: "", anio: String(year), monto: "", exentoPago: false, motivoExento: "viaje" };
 }
 
 function monthLabel(monthNumber) {
   const month = MONTHS.find((entry) => Number(entry.key) === Number(monthNumber));
   return month?.label || "";
+}
+
+function countCellsByStatus(row, status) {
+  return (row?.cells || []).filter((cell) => String(cell.status || "").toUpperCase() === String(status || "").toUpperCase()).length;
 }
 
 function MiniCard({ label, value, valueClassName }) {
@@ -904,15 +1178,18 @@ function buildMensualidadesWorkbook({ year, rows, monthlyFee, stats }) {
   statsSheet["!cols"] = [{ wch: 24 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(workbook, statsSheet, "Resumen");
 
+  const formatSheet = createWideMensualidadesSheet({ year, rows, monthlyFee });
+  XLSX.utils.book_append_sheet(workbook, formatSheet, `AERORUMBA ${year}`);
+
   const templateSheet = createTemplateSheet();
-  XLSX.utils.book_append_sheet(workbook, templateSheet, "Importar");
+  XLSX.utils.book_append_sheet(workbook, templateSheet, "Plantilla_Importar");
 
   return workbook;
 }
 
 function buildMensualidadesTemplateWorkbook() {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, createTemplateSheet(), "Importar");
+  XLSX.utils.book_append_sheet(workbook, createTemplateSheet(), "Plantilla_Importar");
   return workbook;
 }
 
@@ -924,6 +1201,42 @@ function createTemplateSheet() {
   ]);
 
   sheet["!cols"] = [{ wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 28 }];
+  return sheet;
+}
+
+function createWideMensualidadesSheet({ year, rows, monthlyFee }) {
+  const headerRows = [
+    ["♫  AERORUMBA  ♫"],
+    [`SINTRAMUNICIPIO YUMBO ${year}`],
+    ["N°", "APELLIDO", "NOMBRES", ...MONTHS.map((month) => monthHeaderLabel(month.key)), "TOTAL AÑO"],
+  ];
+
+  const bodyRows = rows.map((row, index) => {
+    const nameParts = splitPersonName(row.persona.nombre);
+    const rowByMonth = new Map(row.cells.map((cell) => [Number(cell.month.key), cell]));
+
+    return [
+      index + 1,
+      nameParts.apellido,
+      nameParts.nombres,
+      ...MONTHS.map((month) => {
+        const cell = rowByMonth.get(month.key);
+        const paid = Number(cell?.totalPaid || 0);
+        return paid > 0 ? paid : "";
+      }),
+      row.rowTotal || 0,
+    ];
+  });
+
+  const sheet = XLSX.utils.aoa_to_sheet([...headerRows, ...bodyRows]);
+  sheet["!cols"] = [
+    { wch: 6 },
+    { wch: 22 },
+    { wch: 26 },
+    ...MONTHS.map(() => ({ wch: 11 })),
+    { wch: 14 },
+  ];
+
   return sheet;
 }
 
@@ -943,9 +1256,28 @@ function downloadWorkbook(workbook, filename) {
   URL.revokeObjectURL(url);
 }
 
-function buildMensualidadImportPlan({ sheetRows, personas, movimientos, defaultYear, monthlyFee }) {
+function buildMensualidadImportPlan({ sheetRows, sheetMatrix, sheetName, personas, movimientos, defaultYear, monthlyFee }) {
   const recordsByKey = new Map();
   const errors = [];
+  const skippedStates = [];
+
+  const wideSheetPlan = buildMensualidadImportPlanFromWideSheet({
+    sheetMatrix,
+    sheetName,
+    personas,
+    movimientos,
+    defaultYear,
+    monthlyFee,
+    recordsByKey,
+    errors,
+    skippedStates,
+  });
+
+  if (wideSheetPlan.detected) {
+    const plan = finalizeImportPlan(recordsByKey, errors, sheetRows.length);
+    plan.skippedStates = skippedStates;
+    return plan;
+  }
 
   sheetRows.forEach((rawRow, index) => {
     const rowNumber = index + 2;
@@ -956,7 +1288,7 @@ function buildMensualidadImportPlan({ sheetRows, personas, movimientos, defaultY
     const yearValue = pickRowValue(row, ["anio", "año", "year"]);
     const amountValue = pickRowValue(row, ["monto", "valor", "importe", "pago", "abono"]);
     const noteValue = pickRowValue(row, ["observacion", "observaciones", "nota", "detalle"]);
-    const stateValue = normalizeText(pickRowValue(row, ["estado", "status"]));
+    const stateValue = normalizeHeader(pickRowValue(row, ["estado", "status"]));
 
     if (!personaName) {
       errors.push({ rowNumber, message: "Falta la persona" });
@@ -984,6 +1316,34 @@ function buildMensualidadImportPlan({ sheetRows, personas, movimientos, defaultY
     const amount = parseMoneyValue(amountValue);
     const normalizedAmount = Number.isFinite(amount) ? amount : monthlyFee;
     const statusIsPaid = ["pagado", "completo", "completado", "cancelado"].includes(stateValue);
+    const isNonPayment = NON_PAYMENT_STATES.has(stateValue);
+
+    if (isNonPayment) {
+      const exemptLabel = NON_PAYMENT_DISPLAY[stateValue] || stateValue;
+      const currentPayment = findMensualidadMovimiento({ movimientos, personaId: persona.id, month: monthNumber, year });
+      const key = `${persona.id}-${monthNumber}-${year}`;
+
+      recordsByKey.set(key, {
+        method: currentPayment ? "update" : "create",
+        id: currentPayment?.id || null,
+        personaName: persona.nombre,
+        monthNumber,
+        monthLabel: monthLabel(monthNumber),
+        year,
+        amount: 0,
+        payload: {
+          personaId: Number(persona.id),
+          mes: monthNumber,
+          anio: year,
+          monto: 0,
+          observacion: `EXENTO: ${exemptLabel.toUpperCase()}${noteValue ? ' · ' + noteValue : ''}`,
+        },
+      });
+
+      skippedStates.push({ rowNumber, personaName, state: exemptLabel });
+      return;
+    }
+
     const finalAmount = amount ?? (statusIsPaid ? monthlyFee : normalizedAmount);
     const currentPayment = findMensualidadMovimiento({ movimientos, personaId: persona.id, month: monthNumber, year });
     const key = `${persona.id}-${monthNumber}-${year}`;
@@ -1022,7 +1382,152 @@ function buildMensualidadImportPlan({ sheetRows, personas, movimientos, defaultY
   return {
     records,
     errors,
+    skippedStates,
     totalRows: sheetRows.length,
+    validRows: records.length,
+    invalidRows: errors.length,
+  };
+}
+
+function buildMensualidadImportPlanFromWideSheet({ sheetMatrix, sheetName, personas, movimientos, defaultYear, monthlyFee, recordsByKey, errors, skippedStates }) {
+  const headerRowIndex = findWideHeaderRowIndex(sheetMatrix);
+
+  if (headerRowIndex === -1) {
+    return { detected: false };
+  }
+
+  const headerRow = sheetMatrix[headerRowIndex].map((value) => normalizeHeader(value));
+  const apellidoIndex = headerRow.indexOf("apellido");
+  const nombresIndex = headerRow.indexOf("nombres");
+  if (apellidoIndex === -1 || nombresIndex === -1) {
+    return { detected: false };
+  }
+
+  const monthColumns = headerRow
+    .map((header, columnIndex) => ({ header, columnIndex }))
+    .map((entry) => ({ ...entry, monthNumber: parseMonthHeader(entry.header) }))
+    .filter((entry) => Boolean(entry.monthNumber));
+
+  if (!monthColumns.length) {
+    return { detected: false };
+  }
+
+  const yearFromSheet = extractYearFromText(sheetName) || defaultYear;
+
+  for (let rowIndex = headerRowIndex + 1; rowIndex < sheetMatrix.length; rowIndex += 1) {
+    const rawRow = sheetMatrix[rowIndex] || [];
+    const rowNumber = rowIndex + 1;
+    const apellido = String(rawRow[apellidoIndex] ?? "").trim();
+    const nombres = String(rawRow[nombresIndex] ?? "").trim();
+
+    if (!apellido && !nombres) {
+      continue;
+    }
+
+    const fullName = `${apellido} ${nombres}`.trim();
+    const swappedName = `${nombres} ${apellido}`.trim();
+
+    let persona =
+      resolvePersonaByName(personas, fullName) ||
+      resolvePersonaByName(personas, swappedName) ||
+      resolvePersonaByName(personas, nombres) ||
+      resolvePersonaByName(personas, apellido);
+
+    // If still not found, we'll create the persona during import. Build a normalized "nombre" with
+    // first names followed by last names (the app expects `nombre` as "Nombres Apellidos").
+    const newPersonaName = swappedName || fullName || nombres || apellido;
+
+    monthColumns.forEach(({ columnIndex, monthNumber }) => {
+      const cellValue = rawRow[columnIndex];
+      if (cellValue === null || cellValue === undefined || String(cellValue).trim() === "") {
+        return;
+      }
+
+      const amount = parseMoneyValue(cellValue);
+      // If amount is not numeric, check if cell contains a recognized non-payment state.
+      if (!Number.isFinite(amount)) {
+        const normalized = normalizeHeader(String(cellValue));
+        if (NON_PAYMENT_STATES.has(normalized)) {
+          const exemptLabel = NON_PAYMENT_DISPLAY[normalized] || normalized;
+          const currentPayment = persona ? findMensualidadMovimiento({ movimientos, personaId: persona.id, month: monthNumber, year: yearFromSheet }) : null;
+          const personaIdForKey = persona ? String(persona.id) : `new-${rowIndex}`;
+          const key = `${personaIdForKey}-${monthNumber}-${yearFromSheet}`;
+
+          recordsByKey.set(key, {
+            method: currentPayment ? "update" : "create",
+            id: currentPayment?.id || null,
+            personaName: persona ? persona.nombre : newPersonaName,
+            monthNumber,
+            monthLabel: monthLabel(monthNumber),
+            year: yearFromSheet,
+            amount: 0,
+            payload: {
+              personaId: persona ? Number(persona.id) : null,
+              mes: monthNumber,
+              anio: yearFromSheet,
+              monto: 0,
+              observacion: `EXENTO: ${exemptLabel.toUpperCase()}`,
+            },
+            newPersona: persona ? null : { nombre: newPersonaName, telefono: "" },
+          });
+
+          skippedStates.push({ rowNumber, personaName: persona ? persona.nombre : newPersonaName, monthLabel: monthLabel(monthNumber), state: exemptLabel });
+          return;
+        }
+
+        errors.push({ rowNumber, message: `Monto inválido en ${monthLabel(monthNumber)}` });
+        return;
+      }
+
+      // If persona was not found, create a temporary entry that indicates a new persona must be created
+      // before posting the movimiento. Use a unique temp key to avoid collisions.
+      const personaIdForKey = persona ? String(persona.id) : `new-${rowIndex}`;
+      const currentPayment = persona ? findMensualidadMovimiento({ movimientos, personaId: persona.id, month: monthNumber, year: yearFromSheet }) : null;
+      const key = `${personaIdForKey}-${monthNumber}-${yearFromSheet}`;
+
+      recordsByKey.set(key, {
+        method: currentPayment ? "update" : "create",
+        id: currentPayment?.id || null,
+        personaName: persona ? persona.nombre : newPersonaName,
+        monthNumber,
+        monthLabel: monthLabel(monthNumber),
+        year: yearFromSheet,
+        amount,
+        // If persona exists, payload contains personaId; otherwise we'll create the persona when
+        // importing and fill `payload.personaId` with the created id.
+        payload: {
+          personaId: persona ? Number(persona.id) : null,
+          mes: monthNumber,
+          anio: yearFromSheet,
+          monto: amount,
+          observacion: `Importado desde ${sheetName || "Excel"} · ${monthLabel(monthNumber)} ${yearFromSheet}`,
+        },
+        newPersona: persona ? null : { nombre: newPersonaName, telefono: "" },
+      });
+    });
+  }
+
+  return { detected: true };
+}
+
+function finalizeImportPlan(recordsByKey, errors, totalRows) {
+  const records = Array.from(recordsByKey.values()).sort((left, right) => {
+    const personComparison = left.personaName.localeCompare(right.personaName, "es");
+    if (personComparison !== 0) {
+      return personComparison;
+    }
+
+    if (left.year !== right.year) {
+      return left.year - right.year;
+    }
+
+    return left.monthNumber - right.monthNumber;
+  });
+
+  return {
+    records,
+    errors,
+    totalRows,
     validRows: records.length,
     invalidRows: errors.length,
   };
@@ -1143,4 +1648,94 @@ function normalizeText(value) {
 
 function normalizeHeader(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function findWideHeaderRowIndex(sheetMatrix) {
+  for (let rowIndex = 0; rowIndex < Math.min(sheetMatrix.length, 12); rowIndex += 1) {
+    const row = (sheetMatrix[rowIndex] || []).map((value) => normalizeHeader(value));
+    if (row.includes("apellido") && row.includes("nombres")) {
+      return rowIndex;
+    }
+  }
+
+  return -1;
+}
+
+function parseMonthHeader(value) {
+  const normalized = normalizeHeader(value);
+  const aliasMap = {
+    enero: 1,
+    ene: 1,
+    febrero: 2,
+    feb: 2,
+    marzo: 3,
+    mar: 3,
+    abril: 4,
+    abr: 4,
+    mayo: 5,
+    may: 5,
+    junio: 6,
+    jun: 6,
+    julio: 7,
+    jul: 7,
+    agosto: 8,
+    ago: 8,
+    sept: 9,
+    sep: 9,
+    septiembre: 9,
+    setiembre: 9,
+    octubre: 10,
+    oct: 10,
+    noviembre: 11,
+    nov: 11,
+    diciembre: 12,
+    dic: 12,
+  };
+
+  return aliasMap[normalized] || null;
+}
+
+function monthHeaderLabel(monthNumber) {
+  const labels = {
+    1: "ENERO",
+    2: "FEBRERO",
+    3: "MARZO",
+    4: "ABRIL",
+    5: "MAYO",
+    6: "JUNIO",
+    7: "JULIO",
+    8: "AGOSTO",
+    9: "SEPT.",
+    10: "OCTUBRE",
+    11: "NOV.",
+    12: "DIC",
+  };
+
+  return labels[Number(monthNumber)] || "";
+}
+
+function extractYearFromText(value) {
+  const match = String(value || "").match(/(20\d{2})/);
+  return match ? Number(match[1]) : null;
+}
+
+function splitPersonName(fullName) {
+  const normalized = String(fullName || "").trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return { apellido: "", nombres: "" };
+  }
+
+  const parts = normalized.split(" ");
+  if (parts.length === 1) {
+    return { apellido: parts[0], nombres: "" };
+  }
+
+  if (parts.length === 2) {
+    return { apellido: parts[0], nombres: parts[1] };
+  }
+
+  return {
+    apellido: parts.slice(0, parts.length - 2).join(" ") || parts[0],
+    nombres: parts.slice(-2).join(" "),
+  };
 }

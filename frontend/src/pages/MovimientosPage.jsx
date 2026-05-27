@@ -31,6 +31,7 @@ export default function MovimientosPage() {
   const [filterTipo, setFilterTipo] = useState("TODOS");
   const [search, setSearch] = useState("");
   const [ordenFecha, setOrdenFecha] = useState("FECHA_DESC");
+  const [personaSearch, setPersonaSearch] = useState("");
   const [formData, setFormData] = useState(createEmptyForm());
 
   const filteredMovimientos = useMemo(() => {
@@ -63,6 +64,29 @@ export default function MovimientosPage() {
     return conceptos.filter((concepto) => concepto.tipo !== "MENSUALIDAD");
   }, [conceptos, formData.tipo]);
 
+  const activePersonas = useMemo(() => personas.filter((persona) => persona.activa), [personas]);
+
+  const filteredPersonas = useMemo(() => {
+    const query = personaSearch.trim().toLowerCase();
+
+    if (!query) {
+      return activePersonas;
+    }
+
+    return activePersonas.filter((persona) => String(persona.nombre || "").toLowerCase().includes(query));
+  }, [activePersonas, personaSearch]);
+
+  const personaOptions = useMemo(() => {
+    const selectedPersona = activePersonas.find((persona) => String(persona.id) === String(formData.personaId));
+    const options = [...filteredPersonas];
+
+    if (selectedPersona && !options.some((persona) => String(persona.id) === String(selectedPersona.id))) {
+      options.unshift(selectedPersona);
+    }
+
+    return options;
+  }, [activePersonas, filteredPersonas, formData.personaId]);
+
   const selectedConcepto = useMemo(
     () => conceptos.find((concepto) => String(concepto.id) === String(formData.conceptoId)) || null,
     [conceptos, formData.conceptoId],
@@ -85,6 +109,7 @@ export default function MovimientosPage() {
   const handleOpenDialog = (movimiento) => {
     setFormError("");
     if (movimiento) {
+      const currentPersona = personas.find((item) => String(item.id) === String(movimiento.personaId));
       setEditingMovimiento(movimiento);
       setFormData({
         fecha: movimiento.fecha ? movimiento.fecha.split("T")[0] : new Date().toISOString().split("T")[0],
@@ -96,9 +121,11 @@ export default function MovimientosPage() {
         anio: movimiento.anio ? String(movimiento.anio) : "",
         observacion: movimiento.observacion || "",
       });
+      setPersonaSearch(currentPersona?.nombre || movimiento.persona?.nombre || "");
     } else {
       setEditingMovimiento(null);
       setFormData(createEmptyForm());
+      setPersonaSearch("");
     }
 
     setIsDialogOpen(true);
@@ -297,15 +324,23 @@ export default function MovimientosPage() {
           <SelectField
             label="Persona"
             value={formData.personaId}
-            onChange={(value) => setFormData({ ...formData, personaId: value })}
-            options={[
-              "",
-              ...personas.filter((persona) => persona.activa).map((persona) => String(persona.id)),
-            ]}
+            onChange={(value) => {
+              const selectedPersona = activePersonas.find((persona) => String(persona.id) === String(value));
+              setFormData({ ...formData, personaId: value });
+              setPersonaSearch(selectedPersona?.nombre || personaSearch);
+            }}
+            options={["", ...personaOptions.map((persona) => String(persona.id))]}
             optionLabels={{
               "": "Sin persona",
-              ...Object.fromEntries(personas.map((persona) => [String(persona.id), persona.nombre])),
+              ...Object.fromEntries(personaOptions.map((persona) => [String(persona.id), persona.nombre])),
             }}
+          />
+
+          <Field
+            label="Buscar persona"
+            value={personaSearch}
+            onChange={(value) => setPersonaSearch(value)}
+            placeholder="Escribe para filtrar el listado"
           />
 
           <Field label="Observación" value={formData.observacion} onChange={(value) => setFormData({ ...formData, observacion: value })} placeholder="Detalles adicionales..." multiline rows={3} />
